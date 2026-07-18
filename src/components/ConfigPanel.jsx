@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
-import { Settings, Award, Upload, Trash2, Plus, FileSignature, X } from 'lucide-react';
+import { Settings, Award, Upload, Trash2, Plus, FileSignature, X, RotateCcw } from 'lucide-react';
 
 export default function ConfigPanel() {
-  const { config, updateProfileConfig, showToast } = useApp();
+  const { config, updateProfileConfig, resetProfileConfig, showToast } = useApp();
   const { branding, gradeRules } = config;
 
   // Local state for branding details
@@ -15,6 +15,15 @@ export default function ConfigPanel() {
 
   // Local state to add new remark tags
   const [newRemarkTexts, setNewRemarkTexts] = useState({});
+
+  // Sync inputs when branding configuration changes
+  useEffect(() => {
+    setSchoolName(branding.schoolName || '');
+    setClassName(branding.className || '');
+    setTermExam(branding.termExam || '');
+    setTemplateStyle(branding.templateStyle || 'classic_navy');
+    setCustomDate(branding.customDate || '');
+  }, [branding]);
 
   const handleBrandingSave = (e) => {
     e.preventDefault();
@@ -103,6 +112,41 @@ export default function ConfigPanel() {
 
   return (
     <div className="config-layout">
+      {/* 0. Configuration Panel Header with Reset option */}
+      <div style={{ 
+        gridColumn: '1 / -1', 
+        display: 'flex', 
+        justifyContent: 'space-between', 
+        alignItems: 'center', 
+        paddingBottom: '16px', 
+        borderBottom: '1px solid var(--border-color)', 
+        marginBottom: '20px',
+        flexWrap: 'wrap',
+        gap: '12px'
+      }}>
+        <div>
+          <h2 style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--text-primary)', margin: 0 }}>
+            Configuration Settings
+          </h2>
+          <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', margin: '4px 0 0 0' }}>
+            Customize the grades, school branding, and signatures for this sheet.
+          </p>
+        </div>
+        <button
+          type="button"
+          className="btn btn-danger"
+          style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 16px', fontSize: '0.85rem' }}
+          onClick={() => {
+            if (window.confirm("Are you sure you want to reset all branding settings, signatures, and grading rules to defaults? This cannot be undone.")) {
+              resetProfileConfig();
+            }
+          }}
+        >
+          <RotateCcw style={{ width: '16px', height: '16px' }} />
+          Reset to Default
+        </button>
+      </div>
+
       {/* 1. Branding & Signature Setup */}
       <div className="settings-group">
         <div className="premium-card">

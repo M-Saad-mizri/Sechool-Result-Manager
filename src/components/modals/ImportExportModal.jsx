@@ -1,20 +1,54 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
-import { X, UploadCloud, DownloadCloud, Copy, Download, Link, Upload, File } from 'lucide-react';
+import { X, UploadCloud, DownloadCloud, Copy, Download, Share2, Upload, File } from 'lucide-react';
+
+// Resilient fetch helper that tries direct download first, then falls back to different CORS proxies
+const fetchBackupData = async (url) => {
+  // 1. Try direct fetch
+  try {
+    const res = await fetch(url);
+    if (res.ok) return await res.json();
+  } catch (e) {
+    console.warn("Direct fetch failed, trying CORS proxy (corsproxy.io)...", e);
+  }
+
+  // 2. Try corsproxy.io (Cloudflare based, fast, high availability)
+  try {
+    const proxyUrl = `https://corsproxy.io/?url=${encodeURIComponent(url)}`;
+    const res = await fetch(proxyUrl);
+    if (res.ok) return await res.json();
+  } catch (e) {
+    console.warn("corsproxy.io failed, trying AllOrigins...", e);
+  }
+
+  // 3. Try allorigins.win
+  const allOriginsUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+  const res = await fetch(allOriginsUrl);
+  if (res.ok) return await res.json();
+
+  throw new Error("All fetch attempts failed");
+};
 
 export default function ImportExportModal({ isOpen, onClose }) {
-  const { students, subjects, importData, showToast } = useApp();
+  const { students, subjects, config, activeProfile, importData, showToast } = useApp();
   const [activeTab, setActiveTab] = useState('export');
   const [exportString, setExportString] = useState('');
   const [importString, setImportString] = useState('');
 
   useEffect(() => {
     if (isOpen) {
-      const dataStr = JSON.stringify({ students, subjects });
+      const dataStr = JSON.stringify({
+        name: activeProfile?.name || 'Result Sheet',
+        studentsCount: students.length,
+        createdAt: activeProfile?.createdAt || new Date().toISOString().split('T')[0],
+        students,
+        subjects,
+        config
+      });
       setExportString(dataStr);
       setImportString('');
     }
-  }, [isOpen, students, subjects]);
+  }, [isOpen, students, subjects, config, activeProfile]);
 
   if (!isOpen) return null;
 
@@ -29,9 +63,14 @@ export default function ImportExportModal({ isOpen, onClose }) {
   const downloadBackup = () => {
     const blob = new Blob([exportString], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
-    const now = new Date();
-    const timestamp = now.toISOString().replace(/[:.]/g, "-").split('T')[0];
-    const filename = `result_backup_${timestamp}.json`;
+    
+    const sheetNameClean = (activeProfile?.name || 'Result Sheet')
+      .trim()
+      .replace(/[\s\W]+/g, '_');
+    
+    const numStudents = students.length;
+    const creationDate = activeProfile?.createdAt || new Date().toISOString().split('T')[0];
+    const filename = `${sheetNameClean}_${numStudents}_students_${creationDate}.json`;
 
     const a = document.createElement("a");
     a.href = url;
@@ -47,31 +86,52 @@ export default function ImportExportModal({ isOpen, onClose }) {
     showToast('Backup JSON file saved to downloads!');
   };
 
-  const uploadCloud = async () => {
-    showToast('Uploading database, please wait...', 'warning');
+  const shareData = async () => {
+    if (!navigator.share) {
+      showToast('Sharing requires an HTTPS secure connection. Use Save File/Copy Text locally.', 'warning');
+      alert('ℹ️ Browser Security Policy:\n\nWeb sharing (WhatsApp, Gmail, Quick Share, etc.) requires a secure HTTPS connection to work on mobile devices.\n\nOnce you deploy this site to GitHub Pages (which uses HTTPS), this button will work perfectly on your phone!\n\nFor local testing, please use the "Save File" or "Copy Text" buttons to download and send the backup manually.');
+      return;
+    }
+
     try {
-      const blob = new Blob([exportString], { type: 'application/json' });
-      const formData = new FormData();
-      formData.append("file", blob, "results.json");
-
-      const response = await fetch("https://tmpfiles.org/api/v1/upload", {
-        method: "POST",
-        body: formData,
-      });
-
-      const result = await response.json();
-
-      if (result.data && result.data.url) {
-        const shareLink = result.data.url.replace("/v1/", "/");
-        await navigator.clipboard.writeText(shareLink);
-        showToast('Share link created and copied to clipboard!');
-        alert(`✅ Share link created successfully!\n\nCopied to clipboard:\n${shareLink}\n\n(Expires in 7 days)`);
-      } else {
-        throw new Error("Upload failed");
+      const sheetNameClean = (activeProfile?.name || 'Result Sheet')
+        .trim()
+        .replace(/[\s\W]+/g, '_');
+      const numStudents = students.length;
+      const creationDate = activeProfile?.createdAt || new Date().toISOString().split('T')[0];
+      const filename = `${sheetNameClean}_${numStudents}_students_${creationDate}.json`;
+      
+      const file = new File([exportString], filename, { type: 'application/json' });
+      
+      let shared = false;
+      
+      // Try to share as a file first
+      try {
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+          await navigator.share({
+            files: [file],
+            title: `${activeProfile?.name || 'Result Sheet'} Backup`,
+            text: `Result Sheet Backup for ${activeProfile?.name || 'Result Sheet'}`
+          });
+          shared = true;
+        }
+      } catch (fileShareErr) {
+        console.warn("File sharing failed/rejected by browser, trying text share fallback...", fileShareErr);
       }
+
+      // If file sharing failed or was not supported, try sharing text
+      if (!shared) {
+        await navigator.share({
+          title: `${activeProfile?.name || 'Result Sheet'} Backup`,
+          text: `Result Sheet: ${activeProfile?.name || 'Result Sheet'}\nStudents: ${numStudents}\nDate: ${creationDate}\n\nBackup JSON Data:\n${exportString}`
+        });
+      }
+      showToast('Backup shared successfully!');
     } catch (err) {
-      console.error(err);
-      showToast('Failed to upload. Try copy text or download file.', 'danger');
+      if (err.name !== 'AbortError') {
+        console.error(err);
+        showToast('Failed to share backup.', 'danger');
+      }
     }
   };
 
@@ -86,11 +146,17 @@ export default function ImportExportModal({ isOpen, onClose }) {
 
     if (cleanInput.startsWith("http://") || cleanInput.startsWith("https://")) {
       showToast('Fetching database from link...', 'warning');
+      
+      let fetchUrl = cleanInput;
+      // Auto-convert standard web page links to direct download links
+      if (fetchUrl.includes("tmpfiles.org") && !fetchUrl.includes("/dl/")) {
+        fetchUrl = fetchUrl.replace("tmpfiles.org/", "tmpfiles.org/dl/");
+      }
+
       try {
-        const response = await fetch(cleanInput);
-        if (!response.ok) throw new Error("HTTP error");
-        parsedData = await response.json();
+        parsedData = await fetchBackupData(fetchUrl);
       } catch (e) {
+        console.error(e);
         showToast('Failed to fetch data from link.', 'danger');
         return;
       }
@@ -177,9 +243,9 @@ export default function ImportExportModal({ isOpen, onClose }) {
                     Save File (.json)
                   </button>
                 </div>
-                <button className="btn btn-primary" onClick={uploadCloud}>
-                  <Link style={{ width: '16px', height: '16px' }} />
-                  Create Cloud Link (tmpfiles.org)
+                 <button className="btn btn-primary" onClick={shareData} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                  <Share2 style={{ width: '16px', height: '16px' }} />
+                  Share Backup via Apps
                 </button>
               </div>
             </div>

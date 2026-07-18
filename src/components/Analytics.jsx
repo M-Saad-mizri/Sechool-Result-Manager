@@ -6,13 +6,22 @@ import { Chart, registerables } from 'chart.js';
 Chart.register(...registerables);
 
 export default function Analytics({ visible }) {
-  const { students, theme } = useApp();
+  const { students, theme, config } = useApp();
   
   const barChartRef = useRef(null);
   const doughnutChartRef = useRef(null);
   
   const barInstance = useRef(null);
   const doughnutInstance = useRef(null);
+
+  // Find lowest passing grade threshold dynamically
+  const gradeRules = config?.gradeRules || [];
+  const passingRules = gradeRules.filter(r => r.grade !== 'F');
+  const lowestPassingRule = passingRules.reduce((minRule, currentRule) => {
+    if (!minRule) return currentRule;
+    return currentRule.minPercent < minRule.minPercent ? currentRule : minRule;
+  }, null);
+  const passingThreshold = lowestPassingRule ? lowestPassingRule.minPercent : 50;
 
   useEffect(() => {
     if (!visible) return;
@@ -100,7 +109,7 @@ export default function Analytics({ visible }) {
       doughnutInstance.current = new Chart(ctx, {
         type: 'doughnut',
         data: {
-          labels: ['Passing (≥ 50%)', 'Failing (< 50%)'],
+          labels: [`Passing (≥ ${passingThreshold}%)`, `Failing (< ${passingThreshold}%)`],
           datasets: [{
             data: [passCount, failCount],
             backgroundColor: ['#10b981', '#ef4444'],

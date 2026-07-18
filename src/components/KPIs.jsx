@@ -3,7 +3,16 @@ import { useApp } from '../context/AppContext';
 import { Users, TrendingUp, Award, Crown } from 'lucide-react';
 
 export default function KPIs() {
-  const { kpis } = useApp();
+  const { kpis, config } = useApp();
+
+  // Find lowest passing grade threshold dynamically
+  const gradeRules = config?.gradeRules || [];
+  const passingRules = gradeRules.filter(r => r.grade !== 'F');
+  const lowestPassingRule = passingRules.reduce((minRule, currentRule) => {
+    if (!minRule) return currentRule;
+    return currentRule.minPercent < minRule.minPercent ? currentRule : minRule;
+  }, null);
+  const passingThreshold = lowestPassingRule ? lowestPassingRule.minPercent : 50;
 
   return (
     <div className="kpi-grid">
@@ -33,7 +42,7 @@ export default function KPIs() {
         <div className="kpi-info">
           <span className="kpi-title">Pass Rate %</span>
           <span className="kpi-value">{kpis.passRate}</span>
-          <span className="kpi-sub">Passing Criteria: ≥ 50%</span>
+          <span className="kpi-sub">Passing Criteria: ≥ {passingThreshold}%</span>
         </div>
         <div className="kpi-icon-wrapper">
           <Award style={{ width: '24px', height: '24px' }} />

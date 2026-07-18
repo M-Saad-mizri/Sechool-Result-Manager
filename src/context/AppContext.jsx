@@ -159,6 +159,7 @@ export const AppProvider = ({ children }) => {
         initialProfiles = [{
           id: 'migrated_default',
           name: 'Default Sheet',
+          createdAt: new Date().toISOString().split('T')[0],
           students: migratedStudents,
           subjects: migratedSubjects.length > 0 ? migratedSubjects : [
             { name: "English", maxMarks: 100 },
@@ -179,6 +180,9 @@ export const AppProvider = ({ children }) => {
     // Fill missing configs in loaded profiles
     if (initialProfiles.length > 0) {
       initialProfiles = initialProfiles.map(p => {
+        if (!p.createdAt) {
+          p.createdAt = new Date().toISOString().split('T')[0];
+        }
         if (!p.config) {
           p.config = {
             gradeRules: DEFAULT_GRADE_RULES,
@@ -198,6 +202,7 @@ export const AppProvider = ({ children }) => {
       initialProfiles = [{
         id: defaultId,
         name: 'Class 8-A Assessment',
+        createdAt: new Date().toISOString().split('T')[0],
         students: [],
         subjects: [
           { name: "English", maxMarks: 100 },
@@ -211,7 +216,12 @@ export const AppProvider = ({ children }) => {
       }];
       initialActiveId = defaultId;
     } else if (!initialActiveId) {
-      initialActiveId = initialProfiles[0].id;
+      const savedActiveId = localStorage.getItem('result_compiler_active_profile_id');
+      if (savedActiveId && initialProfiles.some(p => p.id === savedActiveId)) {
+        initialActiveId = savedActiveId;
+      } else {
+        initialActiveId = initialProfiles[0].id;
+      }
     }
 
     setProfiles(initialProfiles);
@@ -225,6 +235,13 @@ export const AppProvider = ({ children }) => {
       setUnsavedChanges(false);
     }
   }, [profiles]);
+
+  // Save active profile ID to localStorage
+  useEffect(() => {
+    if (activeProfileId) {
+      localStorage.setItem('result_compiler_active_profile_id', activeProfileId);
+    }
+  }, [activeProfileId]);
 
   // Sync theme attribute
   useEffect(() => {
@@ -305,6 +322,30 @@ export const AppProvider = ({ children }) => {
     }));
     setUnsavedChanges(true);
     showToast('Configuration settings updated!');
+  };
+
+  const resetProfileConfig = () => {
+    if (!activeProfile) return;
+    
+    const updatedStudents = students.map(std => 
+      calculateStudent(std, subjects, DEFAULT_GRADE_RULES)
+    );
+
+    setProfiles(prev => prev.map(p => {
+      if (p.id === activeProfileId) {
+        return { 
+          ...p, 
+          config: {
+            gradeRules: DEFAULT_GRADE_RULES,
+            branding: DEFAULT_BRANDING
+          },
+          students: updatedStudents
+        };
+      }
+      return p;
+    }));
+    setUnsavedChanges(true);
+    showToast('Configuration settings reset to default values.');
   };
 
   // --- STUDENT ACTIONS ---
@@ -494,6 +535,9 @@ export const AppProvider = ({ children }) => {
       return;
     }
 
+    const importedName = dataObject.name ? dataObject.name.trim() : (activeProfile ? activeProfile.name : 'Imported Sheet');
+
+    // Parse imported subjects
     let importedSubjects = [];
     if (dataObject.subjects) {
       importedSubjects = dataObject.subjects.map(sub => 
@@ -501,8 +545,16 @@ export const AppProvider = ({ children }) => {
       );
     }
 
+    // Parse imported rules and config
+    const importedRules = dataObject.config?.gradeRules || DEFAULT_GRADE_RULES;
+    const importedBranding = dataObject.config?.branding || DEFAULT_BRANDING;
+    const importedConfig = {
+      gradeRules: importedRules,
+      branding: importedBranding
+    };
+
+    // Parse imported students
     let importedStudents = [];
-    const profileRules = dataObject.config?.gradeRules || config.gradeRules;
     if (dataObject.students) {
       importedStudents = dataObject.students.map(std => {
         let marksObj = {};
@@ -528,17 +580,121 @@ export const AppProvider = ({ children }) => {
       });
     }
 
-    const importedBranding = dataObject.config?.branding || config.branding;
+    // Check if profile with the same name exists
+    const existingIdx = profiles.findIndex(p => p.name.toLowerCase() === importedName.toLowerCase());
 
-    updateActiveProfileData({
-      subjects: importedSubjects.length > 0 ? importedSubjects : subjects,
-      students: importedStudents,
-      config: {
-        gradeRules: profileRules,
-        branding: importedBranding
-      }
-    });
-    showToast('Roster imported successfully!');
+    if (existingIdx !== -1) {
+      // Exists: Merge/add data to this sheet
+      const existingProfile = profiles[existingIdx];
+      
+      // 1. Merge subjects: keep existing, add new ones
+      const mergedSubjects = [...existingProfile.subjects];
+      importedSubjects.forEach(impSub => {
+        if (!mergedSubjects.some(sub => sub.name.toLowerCase() === impSub.name.toLowerCase())) {
+          mergedSubjects.push(impSub);
+        }
+      });
+
+      // 2. Overwrite/merge configuration (prefer imported for grading scale, merge branding)
+      const mergedConfig = {
+        gradeRules: dataObject.config?.gradeRules || existingProfile.config?.gradeRules || DEFAULT_GRADE_RULES,
+        branding: {
+          ...(existingProfile.config?.branding || DEFAULT_BRANDING),
+          ...(dataObject.config?.branding || {})
+        }
+      };
+
+      // 3. Merge students: match by name (case-insensitive)
+      const mergedStudents = [...existingProfile.students];
+      importedStudents.forEach(impStd => {
+        const stdIdx = mergedStudents.findIndex(std => std.name.toLowerCase() === impStd.name.toLowerCase());
+        
+        if (stdIdx !== -1) {
+          // Merge student marks
+          const existingStd = mergedStudents[stdIdx];
+          const mergedMarks = { ...existingStd.marks, ...impStd.marks };
+          // Ensure all merged subjects are covered
+          mergedSubjects.forEach(sub => {
+            if (mergedMarks[sub.name] === undefined) {
+              mergedMarks[sub.name] = "";
+            }
+          });
+          mergedStudents[stdIdx] = {
+            ...existingStd,
+            fatherName: impStd.fatherName || existingStd.fatherName,
+            marks: mergedMarks
+          };
+        } else {
+          // Add student
+          const newMarks = { ...impStd.marks };
+          mergedSubjects.forEach(sub => {
+            if (newMarks[sub.name] === undefined) {
+              newMarks[sub.name] = "";
+            }
+          });
+          mergedStudents.push({
+            id: generateId(),
+            name: impStd.name,
+            fatherName: impStd.fatherName || "",
+            marks: newMarks
+          });
+        }
+      });
+
+      // 4. Recalculate metrics for all students in this profile
+      const finalStudents = mergedStudents.map(std => 
+        calculateStudent(std, mergedSubjects, mergedConfig.gradeRules)
+      );
+
+      // Update profile and set active
+      setProfiles(prev => prev.map((p, idx) => {
+        if (idx === existingIdx) {
+          return {
+            ...p,
+            subjects: mergedSubjects,
+            config: mergedConfig,
+            students: finalStudents
+          };
+        }
+        return p;
+      }));
+      setActiveProfileId(existingProfile.id);
+      showToast(`Sheet "${importedName}" already exists. Data has been successfully merged into it!`, 'success');
+    } else {
+      // Does not exist: Create new profile
+      const newProfileId = generateProfileId();
+      const newProfile = {
+        id: newProfileId,
+        name: titleCase(importedName),
+        createdAt: dataObject.createdAt || new Date().toISOString().split('T')[0],
+        subjects: importedSubjects.length > 0 ? importedSubjects : [
+          { name: "English", maxMarks: 100 },
+          { name: "English B/R", maxMarks: 100 },
+          { name: "Urdu", maxMarks: 50 }
+        ],
+        config: importedConfig,
+        students: []
+      };
+
+      // Process students with new profile config and subjects
+      newProfile.students = importedStudents.map(std => {
+        const stdMarks = { ...std.marks };
+        newProfile.subjects.forEach(sub => {
+          if (stdMarks[sub.name] === undefined) stdMarks[sub.name] = "";
+        });
+        const processedStd = {
+          id: std.id || generateId(),
+          name: std.name || "",
+          fatherName: std.fatherName || "",
+          marks: stdMarks
+        };
+        return calculateStudent(processedStd, newProfile.subjects, newProfile.config.gradeRules);
+      });
+
+      setProfiles(prev => [...prev, newProfile]);
+      setActiveProfileId(newProfileId);
+      showToast(`Created new sheet "${titleCase(importedName)}" and imported data.`, 'success');
+    }
   };
 
   // --- MULTIPLE PROFILE SAVING ---
@@ -547,6 +703,7 @@ export const AppProvider = ({ children }) => {
     const newProfile = {
       id: newId,
       name: titleCase(name.trim()) || `Result Sheet #${profiles.length + 1}`,
+      createdAt: new Date().toISOString().split('T')[0],
       students: [],
       subjects: [
         { name: "English", maxMarks: 100 },
@@ -726,6 +883,7 @@ export const AppProvider = ({ children }) => {
       resetActiveProfile,
       importData,
       updateProfileConfig,
+      resetProfileConfig,
 
       // Profile management
       createNewProfile,
