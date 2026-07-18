@@ -99,9 +99,10 @@ export default function ImportExportModal({ isOpen, onClose }) {
         .replace(/[\s\W]+/g, '_');
       const numStudents = students.length;
       const creationDate = activeProfile?.createdAt || new Date().toISOString().split('T')[0];
-      const filename = `${sheetNameClean}_${numStudents}_students_${creationDate}.json`;
       
-      const file = new File([exportString], filename, { type: 'application/json' });
+      // Use .txt extension and text/plain MIME type so browser permits file sharing
+      const filename = `${sheetNameClean}_${numStudents}_students_${creationDate}.txt`;
+      const file = new File([exportString], filename, { type: 'text/plain' });
       
       let shared = false;
       
@@ -119,11 +120,11 @@ export default function ImportExportModal({ isOpen, onClose }) {
         console.warn("File sharing failed/rejected by browser, trying text share fallback...", fileShareErr);
       }
 
-      // If file sharing failed or was not supported, try sharing text
+      // If file sharing failed or was not supported, try sharing metadata text
       if (!shared) {
         await navigator.share({
           title: `${activeProfile?.name || 'Result Sheet'} Backup`,
-          text: `Result Sheet: ${activeProfile?.name || 'Result Sheet'}\nStudents: ${numStudents}\nDate: ${creationDate}\n\nBackup JSON Data:\n${exportString}`
+          text: `Result Sheet: ${activeProfile?.name || 'Result Sheet'}\nStudents: ${numStudents}\nDate: ${creationDate}\n\n(Please use Save File or Copy Text to transfer)`
         });
       }
       showToast('Backup shared successfully!');
@@ -274,7 +275,7 @@ export default function ImportExportModal({ isOpen, onClose }) {
                     Choose File
                     <input 
                       type="file" 
-                      accept=".json" 
+                      accept=".json,.txt" 
                       style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer' }}
                       onChange={handleFileImport}
                     />
