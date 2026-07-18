@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
-import { X, UploadCloud, DownloadCloud, Copy, Download, Share2, Upload, File } from 'lucide-react';
+import { X, UploadCloud, DownloadCloud, Copy, Download, Share2, Upload, File as FileIcon } from 'lucide-react';
 
 // Resilient fetch helper that tries direct download first, then falls back to different CORS proxies
 const fetchBackupData = async (url) => {
@@ -100,27 +100,44 @@ export default function ImportExportModal({ isOpen, onClose }) {
       const numStudents = students.length;
       const creationDate = activeProfile?.createdAt || new Date().toISOString().split('T')[0];
       
-      // Use .txt extension and text/plain MIME type so browser permits file sharing
-      const filename = `${sheetNameClean}_${numStudents}_students_${creationDate}.txt`;
-      const file = new File([exportString], filename, { type: 'text/plain' });
+      const filenameJson = `${sheetNameClean}_${numStudents}_students_${creationDate}.json`;
+      const fileJson = new window.File([exportString], filenameJson, { type: 'application/json' });
       
       let shared = false;
       
-      // Try to share as a file first
+      // 1. Try to share as a .json file first
       try {
-        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        if (navigator.canShare && navigator.canShare({ files: [fileJson] })) {
           await navigator.share({
-            files: [file],
+            files: [fileJson],
             title: `${activeProfile?.name || 'Result Sheet'} Backup`,
             text: `Result Sheet Backup for ${activeProfile?.name || 'Result Sheet'}`
           });
           shared = true;
         }
       } catch (fileShareErr) {
-        console.warn("File sharing failed/rejected by browser, trying text share fallback...", fileShareErr);
+        console.warn("JSON file sharing failed, trying TXT fallback...", fileShareErr);
       }
 
-      // If file sharing failed or was not supported, try sharing metadata text
+      // 2. Try to share as a .txt file fallback
+      if (!shared) {
+        try {
+          const filenameTxt = `${sheetNameClean}_${numStudents}_students_${creationDate}.txt`;
+          const fileTxt = new window.File([exportString], filenameTxt, { type: 'text/plain' });
+          if (navigator.canShare && navigator.canShare({ files: [fileTxt] })) {
+            await navigator.share({
+              files: [fileTxt],
+              title: `${activeProfile?.name || 'Result Sheet'} Backup`,
+              text: `Result Sheet Backup for ${activeProfile?.name || 'Result Sheet'}`
+            });
+            shared = true;
+          }
+        } catch (txtShareErr) {
+          console.warn("TXT file sharing failed, trying text fallback...", txtShareErr);
+        }
+      }
+
+      // 3. Fall back to sharing metadata text
       if (!shared) {
         await navigator.share({
           title: `${activeProfile?.name || 'Result Sheet'} Backup`,
@@ -271,7 +288,7 @@ export default function ImportExportModal({ isOpen, onClose }) {
                     Import Data
                   </button>
                   <button className="btn btn-secondary" style={{ position: 'relative' }}>
-                    <File style={{ width: '16px', height: '16px' }} />
+                    <FileIcon style={{ width: '16px', height: '16px' }} />
                     Choose File
                     <input 
                       type="file" 
