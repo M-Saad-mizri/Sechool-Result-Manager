@@ -100,54 +100,32 @@ export default function ImportExportModal({ isOpen, onClose }) {
       const numStudents = students.length;
       const creationDate = activeProfile?.createdAt || new Date().toISOString().split('T')[0];
       
-      const filenameJson = `${sheetNameClean}_${numStudents}_students_${creationDate}.json`;
-      const fileJson = new window.File([exportString], filenameJson, { type: 'application/json' });
+      // Use .txt extension and text/plain MIME type so browser permits file sharing
+      const filename = `${sheetNameClean}_${numStudents}_students_${creationDate}.txt`;
+      const backupFile = new window.File([exportString], filename, { type: 'text/plain' });
       
-      let shared = false;
-      
-      // 1. Try to share as a .json file first
-      try {
-        if (navigator.canShare && navigator.canShare({ files: [fileJson] })) {
-          await navigator.share({
-            files: [fileJson],
-            title: `${activeProfile?.name || 'Result Sheet'} Backup`,
-            text: `Result Sheet Backup for ${activeProfile?.name || 'Result Sheet'}`
-          });
-          shared = true;
-        }
-      } catch (fileShareErr) {
-        console.warn("JSON file sharing failed, trying TXT fallback...", fileShareErr);
-      }
+      let sharePayload = null;
+      const canShareFiles = navigator.canShare && navigator.canShare({ files: [backupFile] });
 
-      // 2. Try to share as a .txt file fallback
-      if (!shared) {
-        try {
-          const filenameTxt = `${sheetNameClean}_${numStudents}_students_${creationDate}.txt`;
-          const fileTxt = new window.File([exportString], filenameTxt, { type: 'text/plain' });
-          if (navigator.canShare && navigator.canShare({ files: [fileTxt] })) {
-            await navigator.share({
-              files: [fileTxt],
-              title: `${activeProfile?.name || 'Result Sheet'} Backup`,
-              text: `Result Sheet Backup for ${activeProfile?.name || 'Result Sheet'}`
-            });
-            shared = true;
-          }
-        } catch (txtShareErr) {
-          console.warn("TXT file sharing failed, trying text fallback...", txtShareErr);
-        }
-      }
-
-      // 3. Fall back to sharing metadata text
-      if (!shared) {
-        await navigator.share({
+      if (canShareFiles) {
+        sharePayload = {
+          files: [backupFile],
+          title: `${activeProfile?.name || 'Result Sheet'} Backup`,
+          text: `Result Sheet Backup for ${activeProfile?.name || 'Result Sheet'}`
+        };
+      } else {
+        sharePayload = {
           title: `${activeProfile?.name || 'Result Sheet'} Backup`,
           text: `Result Sheet: ${activeProfile?.name || 'Result Sheet'}\nStudents: ${numStudents}\nDate: ${creationDate}\n\n(Please use Save File or Copy Text to transfer)`
-        });
+        };
       }
+
+      console.log("Sharing payload:", sharePayload);
+      await navigator.share(sharePayload);
       showToast('Backup shared successfully!');
     } catch (err) {
       if (err.name !== 'AbortError') {
-        console.error(err);
+        console.error("Web Share failed:", err);
         showToast('Failed to share backup.', 'danger');
       }
     }
